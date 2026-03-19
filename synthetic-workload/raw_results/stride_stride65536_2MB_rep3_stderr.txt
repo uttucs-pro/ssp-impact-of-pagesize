@@ -1,0 +1,2 @@
+Config: size=1024MB iterations=3 pattern=stride stride=65536 pages=2MB
+Time: 0.000624 seconds

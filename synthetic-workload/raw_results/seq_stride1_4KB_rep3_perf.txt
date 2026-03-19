@@ -1,0 +1,20 @@
+# started on Fri Mar 20 02:34:11 2026
+
+
+ Performance counter stats for './load 1024 3 seq':
+
+           262,277      page-faults                                                           
+           262,277      minor-faults                                                          
+                 0      major-faults                                                          
+           798,493      dTLB-load-misses                                                      
+         2,544,163      dTLB-store-misses                                                     
+           270,683      iTLB-load-misses                                                      
+     6,004,029,943      cycles                                                                
+    21,040,841,058      instructions                     #    3.50  insn per cycle            
+
+       1.419837037 seconds time elapsed
+
+       1.174674000 seconds user
+       0.244932000 seconds sys
+
+

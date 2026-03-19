@@ -1,0 +1,1 @@
+RESULT: pattern=rand page_config=2MB size_mb=1024 iterations=3 stride=1 time_sec=191.312135

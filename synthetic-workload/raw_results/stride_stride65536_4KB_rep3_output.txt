@@ -1,0 +1,1 @@
+RESULT: pattern=stride page_config=4KB size_mb=1024 iterations=3 stride=65536 time_sec=0.001508

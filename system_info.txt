@@ -1,0 +1,168 @@
+===== SYSTEM INFO =====
+Linux uttu-Predator-PH315-53 6.17.0-19-generic #19~24.04.2-Ubuntu SMP PREEMPT_DYNAMIC Fri Mar  6 23:08:46 UTC 2 x86_64 x86_64 x86_64 GNU/Linux
+
+===== CPU INFO =====
+Architecture:                            x86_64
+CPU op-mode(s):                          32-bit, 64-bit
+Address sizes:                           39 bits physical, 48 bits virtual
+Byte Order:                              Little Endian
+CPU(s):                                  8
+On-line CPU(s) list:                     0-7
+Vendor ID:                               GenuineIntel
+Model name:                              Intel(R) Core(TM) i5-10300H CPU @ 2.50GHz
+CPU family:                              6
+Model:                                   165
+Thread(s) per core:                      2
+Core(s) per socket:                      4
+Socket(s):                               1
+Stepping:                                2
+CPU(s) scaling MHz:                      75%
+CPU max MHz:                             4500.0000
+CPU min MHz:                             800.0000
+BogoMIPS:                                4999.90
+Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts acpi mmx fxsr sse sse2 ss ht tm pbe syscall nx pdpe1gb rdtscp lm constant_tsc art arch_perfmon pebs bts rep_good nopl xtopology nonstop_tsc cpuid aperfmperf pni pclmulqdq dtes64 monitor ds_cpl vmx est tm2 ssse3 sdbg fma cx16 xtpr pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand lahf_lm abm 3dnowprefetch cpuid_fault epb ssbd ibrs ibpb stibp ibrs_enhanced tpr_shadow flexpriority ept vpid ept_ad fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid mpx rdseed adx smap clflushopt intel_pt xsaveopt xsavec xgetbv1 xsaves dtherm ida arat pln pts hwp hwp_notify hwp_act_window hwp_epp vnmi pku ospke md_clear flush_l1d arch_capabilities
+Virtualization:                          VT-x
+L1d cache:                               128 KiB (4 instances)
+L1i cache:                               128 KiB (4 instances)
+L2 cache:                                1 MiB (4 instances)
+L3 cache:                                8 MiB (1 instance)
+NUMA node(s):                            1
+NUMA node0 CPU(s):                       0-7
+Vulnerability Gather data sampling:      Vulnerable
+Vulnerability Ghostwrite:                Not affected
+Vulnerability Indirect target selection: Mitigation; Aligned branch/return thunks
+Vulnerability Itlb multihit:             KVM: Mitigation: Split huge pages
+Vulnerability L1tf:                      Not affected
+Vulnerability Mds:                       Not affected
+Vulnerability Meltdown:                  Not affected
+Vulnerability Mmio stale data:           Mitigation; Clear CPU buffers; SMT vulnerable
+Vulnerability Old microcode:             Not affected
+Vulnerability Reg file data sampling:    Not affected
+Vulnerability Retbleed:                  Mitigation; Enhanced IBRS
+Vulnerability Spec rstack overflow:      Not affected
+Vulnerability Spec store bypass:         Mitigation; Speculative Store Bypass disabled via prctl
+Vulnerability Spectre v1:                Mitigation; usercopy/swapgs barriers and __user pointer sanitization
+Vulnerability Spectre v2:                Mitigation; Enhanced / Automatic IBRS; IBPB conditional; PBRSB-eIBRS SW sequence; BHI SW loop, KVM SW loop
+Vulnerability Srbds:                     Mitigation; Microcode
+Vulnerability Tsa:                       Not affected
+Vulnerability Tsx async abort:           Not affected
+Vulnerability Vmscape:                   Mitigation; IBPB before exit to userspace
+
+===== MEMORY INFO =====
+               total        used        free      shared  buff/cache   available
+Mem:            15Gi       5.8Gi       4.8Gi       938Mi       5.4Gi       9.7Gi
+Swap:          4.0Gi          0B       4.0Gi
+MemTotal:       16200848 kB
+MemFree:         5070444 kB
+MemAvailable:   10125328 kB
+Buffers:          136284 kB
+Cached:          5352120 kB
+SwapCached:            0 kB
+Active:          5925180 kB
+Inactive:        3430528 kB
+Active(anon):    4157748 kB
+Inactive(anon):        0 kB
+Active(file):    1767432 kB
+Inactive(file):  3430528 kB
+Unevictable:      903276 kB
+Mlocked:              32 kB
+SwapTotal:       4194300 kB
+SwapFree:        4194300 kB
+Zswap:                 0 kB
+Zswapped:              0 kB
+Dirty:            236600 kB
+Writeback:             0 kB
+AnonPages:       4770732 kB
+Mapped:           949964 kB
+Shmem:            960856 kB
+KReclaimable:     196624 kB
+Slab:             443104 kB
+SReclaimable:     196624 kB
+SUnreclaim:       246480 kB
+KernelStack:       21456 kB
+PageTables:        66028 kB
+SecPageTables:      3128 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:    12294724 kB
+Committed_AS:   17730928 kB
+VmallocTotal:   34359738367 kB
+VmallocUsed:      160892 kB
+VmallocChunk:          0 kB
+Percpu:             9760 kB
+HardwareCorrupted:     0 kB
+AnonHugePages:         0 kB
+ShmemHugePages:        0 kB
+ShmemPmdMapped:        0 kB
+FileHugePages:     75776 kB
+FilePmdMapped:         0 kB
+CmaTotal:              0 kB
+CmaFree:               0 kB
+Unaccepted:            0 kB
+Balloon:               0 kB
+HugePages_Total:       0
+HugePages_Free:        0
+HugePages_Rsvd:        0
+HugePages_Surp:        0
+Hugepagesize:       2048 kB
+Hugetlb:               0 kB
+DirectMap4k:      607628 kB
+DirectMap2M:     8656896 kB
+DirectMap1G:     8388608 kB
+
+===== OS INFO =====
+Distributor ID:	Ubuntu
+Description:	Ubuntu 24.04.4 LTS
+Release:	24.04
+Codename:	noble
+
+===== KERNEL =====
+Linux version 6.17.0-19-generic (buildd@lcy02-amd64-019) (x86_64-linux-gnu-gcc-13 (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, GNU ld (GNU Binutils for Ubuntu) 2.42) #19~24.04.2-Ubuntu SMP PREEMPT_DYNAMIC Fri Mar  6 23:08:46 UTC 2
+
+===== STORAGE =====
+NAME        MAJ:MIN RM   SIZE RO TYPE MOUNTPOINTS
+loop0         7:0    0     4K  1 loop /snap/bare/5
+loop1         7:1    0    74M  1 loop /snap/core22/2292
+loop2         7:2    0 251.7M  1 loop /snap/firefox/7766
+loop3         7:3    0  18.5M  1 loop /snap/firmware-updater/210
+loop4         7:4    0 531.4M  1 loop /snap/gnome-42-2204/247
+loop5         7:5    0  91.7M  1 loop /snap/gtk-common-themes/1535
+loop6         7:6    0  10.8M  1 loop /snap/snap-store/1270
+loop7         7:7    0  48.1M  1 loop /snap/snapd/25935
+loop8         7:8    0   576K  1 loop /snap/snapd-desktop-integration/343
+loop9         7:9    0  63.8M  1 loop /snap/core20/2717
+loop10        7:10   0   145M  1 loop /snap/marktext/9
+loop11        7:11   0 349.7M  1 loop /snap/gnome-3-38-2004/143
+sda           8:0    0 931.5G  0 disk 
+└─sda1        8:1    0 931.5G  0 part 
+nvme0n1     259:0    0 238.5G  0 disk 
+├─nvme0n1p1 259:1    0     1G  0 part /boot/efi
+└─nvme0n1p2 259:2    0 237.4G  0 part /
+Filesystem      Size  Used Avail Use% Mounted on
+tmpfs           1.6G  2.4M  1.6G   1% /run
+/dev/nvme0n1p2  233G   16G  206G   8% /
+tmpfs           7.8G   39M  7.7G   1% /dev/shm
+tmpfs           5.0M   12K  5.0M   1% /run/lock
+efivarfs        184K  156K   24K  87% /sys/firmware/efi/efivars
+/dev/nvme0n1p1  1.1G  6.2M  1.1G   1% /boot/efi
+tmpfs           1.6G  152K  1.6G   1% /run/user/1000
+
+===== CACHE INFO =====
+L1d cache:                               128 KiB (4 instances)
+L1i cache:                               128 KiB (4 instances)
+L2 cache:                                1 MiB (4 instances)
+L3 cache:                                8 MiB (1 instance)
+
+===== NUMA INFO =====
+available: 1 nodes (0)
+node 0 cpus: 0 1 2 3 4 5 6 7
+node 0 size: 15821 MB
+node 0 free: 4948 MB
+node distances:
+node   0 
+  0:  10 
+
+===== THP STATUS =====
+always [madvise] never
+always defer defer+madvise [madvise] never

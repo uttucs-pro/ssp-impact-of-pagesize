@@ -1,0 +1,20 @@
+# started on Fri Mar 20 02:56:49 2026
+
+
+ Performance counter stats for './load 1024 3 stride 65536':
+
+           262,276      page-faults                                                           
+           262,276      minor-faults                                                          
+                 0      major-faults                                                          
+            57,332      dTLB-load-misses                                                      
+         2,531,797      dTLB-store-misses                                                     
+           267,740      iTLB-load-misses                                                      
+     1,334,372,433      cycles                                                                
+     1,695,985,368      instructions                     #    1.27  insn per cycle            
+
+       0.326760741 seconds time elapsed
+
+       0.032058000 seconds user
+       0.294534000 seconds sys
+
+

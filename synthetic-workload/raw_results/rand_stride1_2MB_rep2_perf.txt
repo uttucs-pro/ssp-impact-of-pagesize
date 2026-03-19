@@ -1,0 +1,20 @@
+# started on Fri Mar 20 02:46:05 2026
+
+
+ Performance counter stats for './load 1024 3 rand':
+
+               645      page-faults                                                           
+               645      minor-faults                                                          
+                 0      major-faults                                                          
+        12,237,693      dTLB-load-misses                                                      
+         2,142,319      dTLB-store-misses                                                     
+         1,152,894      iTLB-load-misses                                                      
+   761,314,836,526      cycles                                                                
+   227,271,118,916      instructions                     #    0.30  insn per cycle            
+
+     191.408949361 seconds time elapsed
+
+     191.110629000 seconds user
+       0.125947000 seconds sys
+
+

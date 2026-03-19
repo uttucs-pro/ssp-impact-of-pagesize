@@ -1,0 +1,2 @@
+Config: size=1024MB iterations=3 pattern=rand stride=1 pages=2MB
+Time: 191.312135 seconds
