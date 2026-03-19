@@ -1,0 +1,16 @@
+# started on Fri Mar 20 04:06:51 2026
+
+
+ Performance counter stats for process id '57674,57675,57676,57677,57678,57679,57680,57681':
+
+                14      page-faults                                                           
+                14      minor-faults                                                          
+                 0      major-faults                                                          
+        11,456,478      dTLB-load-misses                                                      
+           522,882      dTLB-store-misses                                                     
+        11,155,472      iTLB-load-misses                                                      
+    68,385,005,711      cycles                                                                
+    42,161,399,816      instructions                     #    0.62  insn per cycle            
+
+      31.548741236 seconds time elapsed
+
