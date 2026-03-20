@@ -26,9 +26,6 @@ venv/
 *.snm
 *.vrb
 
-# === Raw experiment results ===
-raw_results/
-
 # === Test data (generated) ===
 webserver-workload/test_data/
 
