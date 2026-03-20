@@ -1,0 +1,696 @@
+\documentclass[conference]{IEEEtran}
+
+% ——— Packages ———
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{hyperref}
+\usepackage{cite}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{xcolor}
+\usepackage[margin=1in]{geometry}    % IEEE default margins
+\usepackage{textcomp}
+\usepackage{array}
+
+\graphicspath{{figures/}}
+
+% ——— Title ———
+\title{Analyzing the Performance Impact of Page Size \\on Application Workloads}
+
+\author{
+\IEEEauthorblockN{Uttkarsh Ranjan MT2025128}
+\IEEEauthorblockA{
+Department of Computer Science\\
+International Institute of Information Technology, Bengaluru\\
+}
+}
+
+\begin{document}
+
+\maketitle
+
+% ============================================================
+% ABSTRACT
+% ============================================================
+\begin{abstract}
+Modern operating systems rely on virtual memory and page-based address translation to manage physical memory. A critical design parameter is the page size, which directly influences page fault rates, Translation Lookaside Buffer (TLB) efficiency, and overall memory access latency. This study systematically evaluates the performance impact of page size---comparing 4\,KB base pages with 2\,MB huge pages---across three representative workloads: a synthetic memory benchmark, a web server (nginx), and a relational database (PostgreSQL). Using Linux Transparent Huge Pages (THP), \texttt{perf stat} instrumentation, and controlled experimental methodology, we measure page faults, TLB misses, execution time, throughput, latency, and CPU efficiency. Our results demonstrate that huge pages are \emph{not} universally beneficial: while random-access synthetic workloads achieve a 1.56$\times$ speedup with 2\,MB pages, both web server and database workloads perform 9--133\% \emph{worse} with huge pages due to THP compaction overhead, iTLB pollution, and internal fragmentation. These findings provide workload-aware guidance for page size tuning in production systems.
+\end{abstract}
+
+\begin{IEEEkeywords}
+page size, page faults, TLB misses, huge pages, transparent huge pages, virtual memory, performance evaluation, Linux, nginx, PostgreSQL, synthetic benchmark
+\end{IEEEkeywords}
+
+% ============================================================
+% I. INTRODUCTION
+% ============================================================
+\section{Introduction}
+
+Modern operating systems rely on virtual memory to efficiently manage physical memory and provide isolation across applications. A key design parameter in virtual memory systems is \emph{page size}, which directly influences page fault behavior, Translation Lookaside Buffer (TLB) efficiency, and memory access latency. While smaller pages reduce internal fragmentation, they increase TLB pressure and page table overhead; conversely, larger pages reduce TLB misses but may negatively impact memory utilization and latency predictability. Linux supports multiple page sizes through base pages (4\,KB) and huge pages (2\,MB), yet the performance implications of page size selection remain highly workload-dependent.
+
+The objective of this project is to systematically study the relationship between page size, page faults, and end-to-end performance metrics such as latency and throughput. The study focuses on understanding how different memory access patterns interact with page size choices and how these interactions vary across application domains. We evaluate both kernel-level metrics---such as minor and major page faults and TLB miss rates---and application-level performance outcomes to derive workload-aware insights into memory management trade-offs.
+
+\subsection{Project Objectives}
+
+The primary objectives of this work are:
+\begin{itemize}
+    \item To quantify page fault behavior under different page size configurations.
+    \item To evaluate the impact of page size on TLB efficiency.
+    \item To measure application-level performance changes (latency and throughput).
+    \item To compare behavior across different application domains.
+    \item To identify scenarios where large pages are beneficial or detrimental.
+\end{itemize}
+
+\subsection{Scope}
+
+The experimental evaluation covers three workload categories:
+
+\begin{enumerate}
+    \item \textbf{Synthetic Memory Benchmark} (C++): controlled sequential, random, and strided memory access patterns over a 1\,GB working set.
+    \item \textbf{Web Server Workload}: nginx static file serving with \texttt{wrk} load generation, testing small ($\sim$7\,KB) and large (50\,MB) files under varying concurrency.
+    \item \textbf{Database Workload}: PostgreSQL with sysbench OLTP benchmarks including read-only, read-write, and range scan workloads.
+\end{enumerate}
+
+A fourth workload---machine learning inference using PyTorch---is planned but not yet completed.
+
+% ============================================================
+% II. EXPERIMENTAL SETUP
+% ============================================================
+\section{Experimental Setup}
+
+\subsection{System Configuration}
+
+All experiments were conducted on a fixed hardware and software configuration to ensure reproducibility. Table~\ref{tab:system} summarizes the system specifications.
+
+\begin{table}[H]
+\centering
+\caption{System Configuration}
+\label{tab:system}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Operating System & Ubuntu 24.04.4 LTS \\
+Kernel & Linux 6.17.0-19-generic (x86\_64) \\
+Processor & Intel Core i5-10300H @ 2.50\,GHz \\
+Cores / Threads & 4 cores / 8 threads \\
+CPU Frequency & 0.8\,GHz -- 4.5\,GHz \\
+L1 Cache & 128\,KB (per core, I+D) \\
+L2 Cache & 1\,MB (per core) \\
+L3 Cache & 8\,MB (shared) \\
+Total RAM & 16\,GB \\
+Available RAM & $\sim$9.7\,GB \\
+Swap & 4\,GB (unused during experiments) \\
+NUMA Nodes & 1 (uniform memory access) \\
+Storage & NVMe SSD ($\sim$238\,GB), ext4 \\
+Default Page Size & 4\,KB \\
+Huge Page Size & 2\,MB \\
+THP Mode & \texttt{madvise} (controlled per experiment) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Page Size Control}
+
+Page size configurations are controlled using Linux Transparent Huge Pages (THP). For 4\,KB experiments, THP is set to \texttt{never}; for 2\,MB experiments, THP is set to \texttt{always}. In the synthetic workload, finer-grained control is achieved using \texttt{madvise()} with \texttt{MADV\_HUGEPAGE} and \texttt{MADV\_NOHUGEPAGE} flags.
+
+\subsection{Instrumentation}
+
+Performance measurement is performed using:
+\begin{itemize}
+    \item \textbf{\texttt{perf stat}}: hardware and kernel performance counters, including page faults (total, minor, major), data and instruction TLB misses, CPU cycles, and instructions retired.
+    \item \textbf{Application-level tools}: \texttt{wrk} (web server throughput/latency), \texttt{sysbench} (database TPS/QPS/latency).
+\end{itemize}
+
+\subsection{Measurement Methodology}
+
+\begin{itemize}
+    \item Each configuration is repeated \textbf{3 times} for statistical robustness.
+    \item Both \textbf{cold-cache} (page cache dropped, services restarted) and \textbf{warm-cache} scenarios are tested.
+    \item No significant background workloads were present during measurements.
+    \item Swap was not utilized, ensuring memory-resident workloads.
+\end{itemize}
+
+% ============================================================
+% III. METRICS COLLECTED
+% ============================================================
+\section{Metrics Collected}
+
+The following categories of metrics are collected across all workloads:
+
+\subsection{Virtual Memory Metrics}
+Total page faults, minor (soft) page faults, major (hard) page faults, and page faults per unit of work.
+
+\subsection{TLB Metrics}
+Data TLB (dTLB) load and store misses, instruction TLB (iTLB) load misses, and TLB miss rates.
+
+\subsection{CPU Execution Metrics}
+CPU cycles, instructions retired, instructions per cycle (IPC), and CPU utilization.
+
+\subsection{Application-Level Metrics}
+Execution time, throughput (requests/sec or transactions/sec), latency (average, median, p95, p99), and operations per second.
+
+\subsection{Derived Metrics}
+Percentage reduction in page faults and TLB misses, performance speedup/slowdown, and fault density (faults per unit work).
+
+% ============================================================
+% IV. SYNTHETIC MEMORY WORKLOAD
+% ============================================================
+\section{Synthetic Memory Workload}
+
+\subsection{Workload Design}
+
+A custom C++ benchmark allocates a 1\,GB memory region (128$\times$ L3 cache) and accesses it using four patterns:
+\begin{itemize}
+    \item \textbf{Sequential}: linear traversal of the entire array.
+    \item \textbf{Random}: random index access using \texttt{rand()} with a fixed seed.
+    \item \textbf{Strided-4096}: every 4096th byte (one access per 4\,KB page boundary).
+    \item \textbf{Strided-65536}: every 65536th byte (one access per 64\,KB boundary).
+\end{itemize}
+
+The benchmark is compiled with \texttt{g++ 13.3.0} at \texttt{-O2} optimization. Page size is controlled via \texttt{madvise()} in \texttt{madvise} THP mode. Each configuration runs 3 iterations per run with 3 repetitions.
+
+\subsection{Results}
+
+Table~\ref{tab:synthetic_results} presents the summary results across all access patterns and page size configurations.
+
+\begin{table}[H]
+\centering
+\caption{Synthetic Workload Results Summary}
+\label{tab:synthetic_results}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+\textbf{Config} & \textbf{Page Faults} & \textbf{dTLB-Load} & \textbf{dTLB-Store} & \textbf{IPC} & \textbf{Time (s)} \\
+\midrule
+seq (4KB)        & 262,278     & 797,978        & 2,541,205      & 3.56 & 1.108 \\
+seq (2MB)        & 643         & 4,550          & 28,896         & 3.87 & 1.120 \\
+\midrule
+rand (4KB)       & 262,276     & 2,977,257,118  & 240,865,284    & 0.21 & 268.876 \\
+rand (2MB)       & 644         & 7,981,998      & 1,465,161      & 0.32 & 172.423 \\
+\midrule
+stride-4K (4KB)  & 262,276     & 560,041        & 2,762,558      & 1.24 & 0.010 \\
+stride-4K (2MB)  & 645         & 3,456          & 25,244         & 0.11 & 0.009 \\
+\midrule
+stride-64K (4KB) & 262,276     & 59,341         & 2,522,223      & 1.26 & 0.002 \\
+stride-64K (2MB) & 644         & 2,703          & 26,251         & 0.11 & 0.001 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\subsection{Key Findings}
+
+\subsubsection{Page Fault Reduction}
+Across all access patterns, huge pages reduced page faults from $\sim$262,276 to $\sim$644---a \textbf{$\sim$407$\times$ reduction}. This is consistent with the ratio of page sizes: $1\,\text{GB} / 4\,\text{KB} = 262{,}144$ pages vs.\ $1\,\text{GB} / 2\,\text{MB} = 512$ pages. This result is pattern-independent because page faults occur during the prefault phase.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{synthetic/page_faults.png}
+    \caption{Page faults: 4\,KB vs 2\,MB pages (synthetic workload).}
+    \label{fig:syn_pf}
+\end{figure}
+
+\subsubsection{TLB Miss Reduction}
+The most dramatic improvements were in dTLB load misses (Table~\ref{tab:syn_tlb}). Random access with 4\,KB pages incurred nearly \textbf{3 billion} dTLB load misses; with 2\,MB pages, misses dropped by 99.7\%.
+
+\begin{table}[H]
+\centering
+\caption{dTLB Load Miss Reduction (Synthetic)}
+\label{tab:syn_tlb}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+\textbf{Pattern} & \textbf{4KB} & \textbf{2MB} & \textbf{Reduction} \\
+\midrule
+Sequential   & 797,978        & 4,550       & 99.4\% \\
+Random       & 2,977,257,118  & 7,981,998   & 99.7\% \\
+Stride-4096  & 560,041        & 3,456       & 99.4\% \\
+Stride-65536 & 59,341         & 2,703       & 95.4\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{synthetic/dtlb_load_misses.png}
+    \caption{dTLB load misses: 4\,KB vs 2\,MB pages (synthetic workload).}
+    \label{fig:syn_dtlb}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{synthetic/dtlb_store_misses.png}
+    \caption{dTLB store misses: 4\,KB vs 2\,MB pages (synthetic workload).}
+    \label{fig:syn_dtlb_store}
+\end{figure}
+
+\subsubsection{Execution Time}
+Random access achieved the largest speedup: \textbf{1.56$\times$} (268.9\,s $\rightarrow$ 172.4\,s), directly correlated with TLB miss reduction. Sequential access showed no meaningful improvement (1.108\,s vs.\ 1.120\,s), confirming that high spatial locality makes TLB efficient even with 4\,KB pages.
+
+\begin{table}[H]
+\centering
+\caption{Execution Time Comparison (Synthetic)}
+\label{tab:syn_time}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+\textbf{Pattern} & \textbf{4KB (s)} & \textbf{2MB (s)} & \textbf{Speedup} \\
+\midrule
+Sequential   & 1.108   & 1.120   & 0.99$\times$ \\
+Random       & 268.876 & 172.423 & \textbf{1.56$\times$} \\
+Stride-4096  & 0.010   & 0.009   & 1.06$\times$ \\
+Stride-65536 & 0.002   & 0.001   & 2.21$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{synthetic/execution_time.png}
+    \caption{Execution time comparison (synthetic workload).}
+    \label{fig:syn_time}
+\end{figure}
+
+\subsubsection{Instructions Per Cycle (IPC)}
+Random access IPC improved from 0.21 to 0.32 (+52.4\%) with huge pages, showing that TLB misses were a major pipeline bottleneck. Sequential access achieved high IPC ($>$3.5) in both configurations, confirming spatial locality.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{synthetic/ipc.png}
+    \caption{IPC comparison across access patterns (synthetic workload).}
+    \label{fig:syn_ipc}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{synthetic/cpu_cycles.png}
+    \caption{CPU cycles comparison (synthetic workload).}
+    \label{fig:syn_cycles}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{synthetic/improvement_summary.png}
+    \caption{Percentage improvement summary with 2\,MB pages (synthetic workload).}
+    \label{fig:syn_improvement}
+\end{figure}
+
+\subsection{Analysis}
+
+\textbf{Why random access benefits most:} Each random access potentially touches a different 4\,KB page. With $\sim$1,500 TLB entries and 262,144 pages in the working set, the TLB hit rate is effectively zero. Huge pages reduce the address space to $\sim$512 pages, making it far more TLB-friendly.
+
+\textbf{Why sequential access shows no improvement:} Sequential access fully utilizes each page before moving to the next. A single TLB miss covers 4,096 (4\,KB) or 2,097,152 (2\,MB) consecutive byte accesses; in both cases, the per-access TLB miss rate is negligible.
+
+\textbf{Page faults vs.\ TLB misses:} Page faults are a one-time cost during initial memory population. TLB misses are ongoing during execution. For long-running workloads, \emph{TLB miss reduction} is the dominant performance driver, not page fault reduction.
+
+% ============================================================
+% V. WEB SERVER WORKLOAD
+% ============================================================
+\section{Web Server Workload}
+
+\subsection{Workload Design}
+
+The web server experiments use \textbf{nginx 1.24.0} configured for static file serving with \texttt{sendfile on}, \texttt{tcp\_nopush on}, and logging disabled. Load is generated using \textbf{wrk 4.1.0} with 4 threads in \texttt{--latency} mode, running locally on port 8088 to eliminate network variability.
+
+\textbf{Test data:} 500 small files ($\sim$6.9\,KB HTML each) and 10 large files (50\,MB binary each). Page configurations are 4\,KB (THP=\texttt{never}) vs.\ 2\,MB (THP=\texttt{always}). Each run lasts 30 seconds with 3 repetitions, for a total of \textbf{48 runs} (2 file sizes $\times$ 2 concurrency levels $\times$ 2 page configs $\times$ 2 cache states $\times$ 3 repetitions).
+
+\subsection{Results}
+
+\subsubsection{Small File Serving ($\sim$7\,KB)}
+
+\begin{table}[H]
+\centering
+\caption{Small File Serving Results}
+\label{tab:web_small}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+\textbf{Config} & \textbf{Req/s} & \textbf{Avg Lat ($\mu$s)} & \textbf{p99 ($\mu$s)} & \textbf{PF} & \textbf{dTLB-L} & \textbf{IPC} \\
+\midrule
+c10-4KB-cold  & 115,192 & 77    & 519   & 72  & 17.0M & 0.52 \\
+c10-2MB-cold  & 63,211  & 157   & 1,360 & 77  & 21.7M & 0.44 \\
+c10-4KB-warm  & 107,245 & 81    & 504   & 0   & 17.4M & 0.52 \\
+c10-2MB-warm  & 67,998  & 143   & 1,230 & 0   & 21.0M & 0.45 \\
+c200-4KB-cold & 150,130 & 1,353 & 6,383 & 156 & 56.3M & 0.49 \\
+c200-2MB-cold & 92,162  & 2,110 & 9,433 & 153 & 44.6M & 0.42 \\
+c200-4KB-warm & 145,620 & 1,353 & 6,233 & 2   & 57.5M & 0.49 \\
+c200-2MB-warm & 79,493  & 2,390 & 10,203& 3   & 41.4M & 0.41 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\subsubsection{Large File Serving (50\,MB)}
+
+\begin{table}[H]
+\centering
+\caption{Large File Serving Results}
+\label{tab:web_large}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+\textbf{Config} & \textbf{Req/s} & \textbf{Avg Lat (ms)} & \textbf{p99 (ms)} & \textbf{PF} & \textbf{dTLB-L} & \textbf{IPC} \\
+\midrule
+c10-4KB-cold  & 256 & 27.2  & 77.6    & 76  & 37.1M & 0.85 \\
+c10-2MB-cold  & 120 & 60.0  & 145.8   & 61  & 11.7M & 0.62 \\
+c10-4KB-warm  & 273 & 32.4  & 212.9   & 1   & 41.8M & 0.87 \\
+c10-2MB-warm  & 117 & 61.2  & 130.0   & 9   & 11.7M & 0.62 \\
+c200-4KB-cold & 180 & 761.9 & 1,906.7 & 560 & 10.0M & 0.74 \\
+c200-2MB-cold & 135 & 931.4 & 1,946.7 & 558 & 12.4M & 0.62 \\
+c200-4KB-warm & 161 & 811.2 & 1,916.7 & 63  & 14.4M & 0.69 \\
+c200-2MB-warm & 140 & 864.2 & 1,933.3 & 159 & 13.7M & 0.62 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\subsection{Key Findings}
+
+\subsubsection{4\,KB Pages Consistently Outperform 2\,MB Pages}
+This is the most striking result. Unlike the synthetic workload, 4\,KB pages delivered \textbf{42--133\% higher throughput} than 2\,MB pages across all configurations (Table~\ref{tab:web_advantage}).
+
+\begin{table}[H]
+\centering
+\caption{Throughput Advantage of 4\,KB Pages (Web Server)}
+\label{tab:web_advantage}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+\textbf{Config} & \textbf{4KB} & \textbf{2MB} & \textbf{4KB Adv.} \\
+\midrule
+Small, c10, cold  & 115,192 & 63,211 & +82\%  \\
+Small, c10, warm  & 107,245 & 67,998 & +58\%  \\
+Small, c200, cold & 150,130 & 92,162 & +63\%  \\
+Small, c200, warm & 145,620 & 79,493 & +83\%  \\
+Large, c10, cold  & 256     & 120    & +113\% \\
+Large, c10, warm  & 273     & 117    & +133\% \\
+Large, c200, cold & 180     & 135    & +33\%  \\
+Large, c200, warm & 161     & 140    & +15\%  \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{webserver/throughput.png}
+    \caption{Request throughput: 4\,KB vs 2\,MB pages (web server).}
+    \label{fig:web_throughput}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{webserver/throughput_change.png}
+    \caption{Percentage throughput change with 2\,MB pages (web server).}
+    \label{fig:web_throughput_change}
+\end{figure}
+
+\subsubsection{Page Faults Are Not the Bottleneck}
+Page faults were extremely low ($\sim$60--160 for cold, $\sim$0 for warm), confirming that nginx and the OS page cache handle demand paging efficiently.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{webserver/page_faults.png}
+    \caption{Page faults comparison (web server).}
+    \label{fig:web_pf}
+\end{figure}
+
+\subsubsection{Mixed TLB Behavior}
+Unlike synthetic workloads, dTLB load misses did \emph{not} consistently decrease with huge pages. For small files, dTLB misses \emph{increased} (17M $\rightarrow$ 22M at c10). For large files, dTLB misses \emph{decreased} (37M $\rightarrow$ 12M) but throughput still dropped.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{webserver/dtlb_load_misses.png}
+    \caption{dTLB load misses (web server).}
+    \label{fig:web_dtlb}
+\end{figure}
+
+\subsubsection{iTLB Pollution with Huge Pages}
+A critical observation: iTLB load misses were significantly elevated with 2\,MB pages for small files. Huge pages for data regions displace instruction TLB entries, causing instruction fetch stalls.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{webserver/itlb_load_misses.png}
+    \caption{iTLB load misses (web server).}
+    \label{fig:web_itlb}
+\end{figure}
+
+\subsubsection{IPC and Latency}
+IPC was consistently lower with 2\,MB pages (--14\% to --27\%), indicating increased pipeline stalls despite fewer dTLB misses for data. Latency roughly doubled across most configurations.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{webserver/ipc.png}
+    \caption{IPC comparison (web server).}
+    \label{fig:web_ipc}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{webserver/latency_avg.png}
+    \caption{Average latency comparison (web server).}
+    \label{fig:web_lat_avg}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{webserver/latency_p99.png}
+    \caption{p99 tail latency comparison (web server).}
+    \label{fig:web_lat_p99}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{webserver/cpu_cycles.png}
+    \caption{CPU cycles comparison (web server).}
+    \label{fig:web_cycles}
+\end{figure}
+
+\subsection{Analysis}
+
+Several factors explain why 4\,KB pages outperform 2\,MB pages for nginx:
+
+\begin{enumerate}
+    \item \textbf{Memory access pattern}: nginx serves files via \texttt{sendfile()}, performing sequential reads through the page cache. Data is copied from page cache to socket buffers via DMA---minimal TLB-dependent user-space memory access occurs.
+    \item \textbf{Internal fragmentation}: small files ($\sim$7\,KB) occupy 2 pages at 4\,KB but waste most of a 2\,MB huge page, reducing effective memory utilization and cache efficiency.
+    \item \textbf{THP overhead}: with THP set to \texttt{always}, the kernel's \texttt{khugepaged} daemon actively compacts and promotes pages, consuming CPU cycles and causing latency spikes.
+    \item \textbf{iTLB pollution}: huge pages for data regions displace instruction TLB entries. nginx's HTTP handling involves complex branching that is sensitive to iTLB misses.
+    \item \textbf{Page table walk cost}: for nginx's working set (many small files + connection state), the 4\,KB page table structure is more cache-friendly.
+\end{enumerate}
+
+% ============================================================
+% VI. DATABASE WORKLOAD
+% ============================================================
+\section{Database Workload}
+
+\subsection{Workload Design}
+
+The database experiments use \textbf{PostgreSQL 16} with \textbf{sysbench 1.0.20} OLTP benchmarks. The dataset consists of 4 tables $\times$ 1,000,000 rows ($\sim$1.5\,GB). Each run lasts 60 seconds with 4 threads and 3 repetitions, for a total of \textbf{36 runs} (3 workloads $\times$ 2 page configs $\times$ 2 cache states $\times$ 3 repetitions).
+
+\textbf{Workloads tested:}
+\begin{itemize}
+    \item \textbf{Read-only (OLTP)}: 14 SELECT queries per transaction (point lookups + range queries).
+    \item \textbf{Read-write (OLTP)}: SELECT, UPDATE, INSERT, DELETE (20 queries per transaction).
+    \item \textbf{Range scan}: range queries over contiguous key ranges (100-row ranges).
+\end{itemize}
+
+\subsection{Results}
+
+\begin{table}[H]
+\centering
+\caption{Database Workload Results Summary}
+\label{tab:db_results}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+\textbf{Config} & \textbf{TPS} & \textbf{QPS} & \textbf{Avg (ms)} & \textbf{p95 (ms)} & \textbf{PF} & \textbf{IPC} \\
+\midrule
+RO-4KB-cold  & 1,745 & 27,913 & 2.29 & 3.31 & 1,060 & 0.89 \\
+RO-2MB-cold  & 1,376 & 22,023 & 2.90 & 4.20 & 1,058 & 0.90 \\
+RO-4KB-warm  & 1,891 & 30,259 & 2.11 & 2.84 & 13    & 1.16 \\
+RO-2MB-warm  & 1,331 & 21,291 & 3.01 & 4.34 & 12    & 0.92 \\
+\midrule
+RW-4KB-cold  & 1,175 & 23,504 & 3.40 & 4.41 & 3,262 & 0.58 \\
+RW-2MB-cold  & 930   & 18,601 & 4.30 & 5.95 & 3,317 & 0.48 \\
+RW-4KB-warm  & 1,000 & 20,005 & 4.00 & 5.51 & 715   & 0.47 \\
+RW-2MB-warm  & 916   & 18,326 & 4.37 & 6.15 & 723   & 0.47 \\
+\midrule
+Range-4KB-cold & 7,434 & 22,301 & 0.54 & 0.95 & 1,965 & 0.73 \\
+Range-2MB-cold & 6,743 & 20,230 & 0.59 & 1.05 & 2,030 & 0.69 \\
+Range-4KB-warm & 7,531 & 22,592 & 0.53 & 0.93 & 13    & 0.90 \\
+Range-2MB-warm & 7,502 & 22,505 & 0.53 & 0.93 & 224   & 0.81 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\subsection{Key Findings}
+
+\subsubsection{4\,KB Pages Outperform 2\,MB Pages}
+
+4\,KB pages provide 9--42\% higher throughput for point lookup workloads, with the gap widening in warm-cache scenarios. Range scans show negligible difference.
+
+\begin{table}[H]
+\centering
+\caption{TPS Advantage of 4\,KB Pages (Database)}
+\label{tab:db_advantage}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+\textbf{Workload} & \textbf{4KB} & \textbf{2MB} & \textbf{4KB Adv.} \\
+\midrule
+Read-only, cold  & 1,745 & 1,376 & +27\% \\
+Read-only, warm  & 1,891 & 1,331 & +42\% \\
+Read-write, cold & 1,175 & 930   & +26\% \\
+Read-write, warm & 1,000 & 916   & +9\%  \\
+Range, cold      & 7,434 & 6,743 & +10\% \\
+Range, warm      & 7,531 & 7,502 & +0.4\%\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{database/tps.png}
+    \caption{Transactions per second: 4\,KB vs 2\,MB pages (database).}
+    \label{fig:db_tps}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{database/tps_change.png}
+    \caption{TPS percentage change with 2\,MB pages (database).}
+    \label{fig:db_tps_change}
+\end{figure}
+
+\subsubsection{Page Faults Are Similar Between Configurations}
+Page faults are low ($\sim$1K--3K cold, $\sim$10--700 warm) and nearly identical between configurations. PostgreSQL's internal buffer pool mediates memory access, neutralizing page fault differences.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{database/page_faults.png}
+    \caption{Page faults comparison (database).}
+    \label{fig:db_pf}
+\end{figure}
+
+\subsubsection{Latency}
+The p95 tail latency increase with 2\,MB pages is notable for read-only workloads (+27\% cold, +53\% warm), indicating THP background compaction causes latency spikes.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{database/latency_avg.png}
+    \caption{Average latency comparison (database).}
+    \label{fig:db_lat_avg}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{database/latency_p95.png}
+    \caption{p95 tail latency comparison (database).}
+    \label{fig:db_lat_p95}
+\end{figure}
+
+\subsubsection{IPC and TLB Metrics}
+In the warm read-only scenario, 4\,KB pages achieve markedly higher IPC (1.16 vs.\ 0.92), suggesting huge pages increase pipeline stalls during point lookups.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{database/ipc.png}
+    \caption{IPC comparison (database).}
+    \label{fig:db_ipc}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{database/dtlb_load_misses.png}
+    \caption{dTLB load misses (database).}
+    \label{fig:db_dtlb}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{database/cpu_cycles.png}
+    \caption{CPU cycles comparison (database).}
+    \label{fig:db_cycles}
+\end{figure}
+
+\subsection{Analysis}
+
+\begin{enumerate}
+    \item \textbf{PostgreSQL manages its own buffer pool}: \texttt{shared\_buffers} provides an application-level cache on top of the OS page cache. Most data access hits the buffer pool, bypassing OS page faults entirely.
+    \item \textbf{B-tree index traversal}: point lookups traverse non-contiguous pages. With 2\,MB pages, the additional memory loaded per TLB entry is mostly wasted.
+    \item \textbf{THP compaction overhead}: the \texttt{khugepaged} daemon competes with PostgreSQL's I/O-intensive workload.
+    \item \textbf{Memory efficiency}: PostgreSQL's buffer pool uses 8\,KB pages internally. Each 2\,MB OS page holds 256 PostgreSQL pages, but only a few may be actively accessed.
+\end{enumerate}
+
+Range scans show minimal difference because contiguous key ranges produce sequential B-tree leaf page access---high spatial locality makes page size irrelevant, consistent with the synthetic sequential result.
+
+% ============================================================
+% VII. CROSS-WORKLOAD COMPARISON
+% ============================================================
+\section{Cross-Workload Comparison}
+
+Table~\ref{tab:cross_workload} summarizes the page size impact across all three workloads, demonstrating that the benefit of huge pages is highly workload-dependent.
+
+\begin{table}[H]
+\centering
+\caption{Cross-Workload Page Size Impact}
+\label{tab:cross_workload}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lllll@{}}
+\toprule
+\textbf{Aspect} & \textbf{Synthetic (Random)} & \textbf{Web Server} & \textbf{Database} \\
+\midrule
+Page size winner   & \textbf{2\,MB} (+56\%) & \textbf{4\,KB} (+33--133\%) & \textbf{4\,KB} (+9--42\%) \\
+Access pattern     & Truly random, user-space & Kernel (sendfile) & Index traversal \\
+Page faults (4KB)  & High (262K) & Very low ($\sim$65) & Low ($\sim$1K--3K) \\
+TLB miss reduction & 99.7\% with 2MB & Mixed / worse & No clear benefit \\
+Why 4KB wins       & N/A & THP overhead, iTLB & THP overhead, buffer pool \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+Key insights from the cross-workload comparison:
+\begin{enumerate}
+    \item \textbf{Only purely random, user-space memory access benefits from huge pages}. The synthetic random workload---where each access touches a different page---is the only scenario with clear speedup.
+    \item \textbf{Kernel-mediated access (sendfile) bypasses TLB benefits}. nginx's use of \texttt{sendfile()} means data never passes through user-space TLB entries, negating the advantage of huge pages.
+    \item \textbf{Application-level buffering masks page faults}. PostgreSQL's buffer pool absorbs most memory accesses before they reach the OS, making page size nearly irrelevant for page fault behavior.
+    \item \textbf{THP \texttt{always} mode is harmful for server workloads}. The background compaction by \texttt{khugepaged} consistently degrades performance for both nginx and PostgreSQL.
+    \item \textbf{\texttt{madvise} mode is the correct default}. It allows applications to opt-in to huge pages only where beneficial.
+\end{enumerate}
+
+% ============================================================
+% VIII. CONCLUSIONS
+% ============================================================
+\section{Conclusions}
+
+This study provides a comprehensive, workload-aware characterization of how page size influences page fault behavior and application performance. Our key conclusions are:
+
+\begin{enumerate}
+    \item \textbf{Huge pages (2\,MB) universally reduce page faults and TLB misses}, but the performance impact depends entirely on the memory access pattern. Page faults decreased by $\sim$407$\times$ across all workloads with huge pages.
+
+    \item \textbf{Random user-space access benefits most}: the synthetic random workload achieved a 1.56$\times$ speedup, with dTLB miss reduction of 99.7\%. This result is directly applicable to workloads like hash tables and graph algorithms.
+
+    \item \textbf{Web server performance degrades with huge pages}: nginx throughput dropped 33--133\% with 2\,MB pages due to THP compaction overhead, iTLB pollution, and internal fragmentation from small files.
+
+    \item \textbf{Database performance degrades with huge pages}: PostgreSQL OLTP throughput dropped 9--42\% with 2\,MB pages because the internal buffer pool masks page fault benefits while THP overhead increases tail latency.
+
+    \item \textbf{TLB miss reduction is the primary performance driver}, not page fault reduction. Page faults are a fixed one-time cost; TLB misses are ongoing during execution.
+
+    \item \textbf{THP \texttt{madvise} mode is the recommended configuration} for production systems, allowing workload-specific opt-in rather than system-wide huge page promotion.
+
+    \item \textbf{IPC is a useful diagnostic indicator}: low IPC ($<$0.5) signals TLB/memory bottlenecks where huge pages may help, while high IPC ($>$1.0) indicates spatial locality that already minimizes TLB overhead.
+\end{enumerate}
+
+These findings demonstrate that page size tuning must be informed by workload memory access patterns. Large pages are not universally beneficial, and indiscriminate use of THP \texttt{always} mode can significantly harm performance for server workloads.
+
+\section{Future Work}
+
+The following extensions are planned:
+\begin{itemize}
+    \item \textbf{Machine Learning Workloads}: evaluate PyTorch model loading and inference under different page sizes to characterize the impact on contiguous memory allocation patterns.
+    \item \textbf{1\,GB Huge Pages}: investigate the effect of even larger page sizes on workloads that allocate very large memory regions.
+\end{itemize}
+
+\end{document}

@@ -1,0 +1,45 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+
+# === C/C++ ===
+*.o
+*.out
+
+# === LaTeX auxiliary files ===
+*.aux
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.bbl
+*.blg
+*.nav
+*.snm
+*.vrb
+
+# === Raw experiment results ===
+raw_results/
+
+# === Test data (generated) ===
+webserver-workload/test_data/
+
+# === Compiled binaries ===
+synthetic-workload/load
+
+# === OS / Editor ===
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+.vscode/
+.idea/
