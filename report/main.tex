@@ -23,6 +23,7 @@
 \title{Analyzing the Performance Impact of Page Size \\on Application Workloads}
 
 \author{
+\IEEEauthorblockN{Abhash Tiwari MT2025002}
 \IEEEauthorblockN{Uttkarsh Ranjan MT2025128}
 \IEEEauthorblockA{
 Department of Computer Science\\
@@ -38,7 +39,7 @@ International Institute of Information Technology, Bengaluru\\
 % ABSTRACT
 % ============================================================
 \begin{abstract}
-Modern operating systems rely on virtual memory and page-based address translation to manage physical memory. A critical design parameter is the page size, which directly influences page fault rates, Translation Lookaside Buffer (TLB) efficiency, and overall memory access latency. This study systematically evaluates the performance impact of page size---comparing 4\,KB base pages with 2\,MB huge pages---across three representative workloads: a synthetic memory benchmark, a web server (nginx), and a relational database (PostgreSQL). Using Linux Transparent Huge Pages (THP), \texttt{perf stat} instrumentation, and controlled experimental methodology, we measure page faults, TLB misses, execution time, throughput, latency, and CPU efficiency. Our results demonstrate that huge pages are \emph{not} universally beneficial: while random-access synthetic workloads achieve a 1.56$\times$ speedup with 2\,MB pages, both web server and database workloads perform 9--133\% \emph{worse} with huge pages due to THP compaction overhead, iTLB pollution, and internal fragmentation. These findings provide workload-aware guidance for page size tuning in production systems.
+Modern operating systems rely on virtual memory and page-based address translation to manage physical memory. A critical design parameter is the page size, which directly influences page fault rates, Translation Lookaside Buffer (TLB) efficiency, and overall memory access latency. This study systematically evaluates the performance impact of page size---comparing 4\,KB base pages with 2\,MB huge pages---across three representative workloads: a synthetic memory benchmark, a web server (nginx), a relational database (PostgreSQL) and a machine learning model (ResNet-152). Using Linux Transparent Huge Pages (THP), \texttt{perf stat} instrumentation, and controlled experimental methodology, we measure page faults, TLB misses, execution time, throughput, latency, and CPU efficiency. Our results demonstrate that huge pages are \emph{not} universally beneficial: while random-access synthetic workloads achieve a 1.56$\times$ speedup with 2\,MB pages, both web server and database workloads perform 9--133\% \emph{worse} with huge pages due to THP compaction overhead, iTLB pollution, and internal fragmentation. ML workloads acheive 95--99\% \emph{page fault reduction} and \emph{dTLB misses} reduction by 77--98\%.  These findings provide workload-aware guidance for page size tuning in production systems.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -543,7 +544,7 @@ Read-only, cold  & 1,745 & 1,376 & +27\% \\
 Read-only, warm  & 1,891 & 1,331 & +42\% \\
 Read-write, cold & 1,175 & 930   & +26\% \\
 Read-write, warm & 1,000 & 916   & +9\%  \\
-Range, cold      & 7,434 & 6,743 & +10\% \\
+Range, cold      & 7,434 & 6,743 & +10\% \\dTLB misses by 77--98\%
 Range, warm      & 7,531 & 7,502 & +0.4\%\\
 \bottomrule
 \end{tabular}
@@ -626,6 +627,387 @@ In the warm read-only scenario, 4\,KB pages achieve markedly higher IPC (1.16 vs
 Range scans show minimal difference because contiguous key ranges produce sequential B-tree leaf page access---high spatial locality makes page size irrelevant, consistent with the synthetic sequential result.
 
 % ============================================================
+% VII. ML WORKLOAD
+% ============================================================
+\section{Machine Learning Workload}
+
+\subsection{Experimental Setup}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+System & Linux 6.17.0-19-generic, 16 GB RAM, 8 cores \\
+Cache hierarchy & L1=32KB, L2=256KB, L3=8MB \\
+Framework & PyTorch (CPU-only) \\
+Model & ResNet-152 (~230 MB, 60M parameters) \\
+Page configs & 4 KB (THP=never) vs 2 MB (THP=always) \\
+Instrumentation & \texttt{perf stat} + benchmark logs \\
+Repetitions & 3 per configuration \\
+Total runs & 48 \\
+\bottomrule
+\end{tabular}
+\caption{ML workload experimental setup}
+\end{table}
+
+\subsection{Workload Design}
+
+The machine learning workload is designed to represent realistic deep learning 
+execution patterns while isolating the impact of memory management mechanisms 
+such as page size and TLB behavior.
+
+\paragraph{Model Selection}
+We use a pre-trained ResNet-152 model implemented in PyTorch. This model is 
+representative of modern deep learning workloads, containing approximately 
+60 million parameters and occupying around 230 MB in memory. Its depth and 
+structure ensure significant compute and memory interaction.
+
+\paragraph{Execution Modes}
+The workload is divided into multiple execution modes to capture different 
+phases of ML systems:
+
+\begin{itemize}
+    \item \textbf{Model Loading (Cold Start):} Measures the cost of loading 
+    model weights from disk into memory, capturing I/O and initial page faults.
+
+    \item \textbf{Inference (Steady State):} Executes repeated forward passes 
+    to simulate production inference scenarios where the model is already loaded.
+
+    \item \textbf{Tensor Allocation:} Allocates large tensors 
+    ($10{,}000 \times 10{,}000$ float32, $\sim$400 MB) to stress memory allocation 
+    and page fault handling.
+
+    \item \textbf{Batch Size Variation:} Evaluates inference performance across 
+    batch sizes (1, 32, 128) to analyze scaling behavior and memory footprint impact.
+\end{itemize}
+
+\paragraph{Memory Configuration}
+Two memory configurations are evaluated:
+\begin{itemize}
+    \item \textbf{4 KB pages:} Transparent Huge Pages (THP) disabled.
+    \item \textbf{2 MB pages:} THP set to \texttt{always}.
+\end{itemize}
+
+This allows direct comparison between standard paging and huge page usage.
+
+\paragraph{Cache State Control}
+To isolate the impact of caching effects, each experiment is conducted under:
+\begin{itemize}
+    \item \textbf{Cold cache:} OS page cache is dropped before execution.
+    \item \textbf{Warm cache:} Data is preloaded into memory prior to measurement.
+\end{itemize}
+
+\paragraph{Measurement Methodology}
+Each configuration is executed three times to ensure statistical stability. 
+Performance counters are collected using \texttt{perf stat}, including page faults, 
+dTLB load misses, instructions per cycle (IPC), and execution time.
+
+\paragraph{Design Rationale}
+The workload is intentionally structured to separate memory-bound and compute-bound 
+phases. Tensor allocation emphasizes memory behavior, while inference highlights 
+compute dominance. This separation enables a clear analysis of when huge pages 
+provide tangible performance benefits.
+
+\subsection{Results}
+
+\begin{table}[H]
+\caption{Model Loading}
+\centering
+\resizebox{\columnwidth}{!}{
+\begin{tabular}{lccccc}
+\hline
+Config & Load Time (s) & Page Faults & dTLB Load Misses & IPC & Wall Time (s) \\
+\hline
+model\_load-4KB-cold & 0.833 & 351,086 $\pm$1,163 & 8,330,475 & 1.22 & 8.42 \\
+model\_load-2MB-cold & 0.801 & 273,003 $\pm$16,748 & 8,250,959 & 1.24 & 8.19 \\
+model\_load-4KB-warm & 0.786 & 355,585 $\pm$8,113 & 7,703,842 & 1.27 & 7.29 \\
+model\_load-2MB-warm & 0.742 & 274,829 $\pm$15,526 & 7,671,505 & 1.28 & 6.99 \\
+\hline
+\end{tabular}}
+\end{table}
+
+\begin{table}[H]
+\caption{Inference (batch\_size=32)}
+\centering
+\resizebox{\columnwidth}{!}{
+\begin{tabular}{lccccc}
+\hline
+Config & Infer Time/iter (s) & Page Faults & dTLB Load Misses & IPC & Wall Time (s) \\
+\hline
+inference-4KB-cold & 5.292 & 145,950,070 $\pm$3.5M & 531,414,385 & 1.26 & 539.73 \\
+inference-2MB-cold & 5.190 & 7,541,180 $\pm$277K & 123,380,193 & 1.14 & 529.33 \\
+inference-4KB-warm & 5.219 & 148,363,285 $\pm$1.7M & 540,086,389 & 1.26 & 531.05 \\
+inference-2MB-warm & 5.217 & 6,551,774 $\pm$853K & 120,038,970 & 1.13 & 530.82 \\
+\hline
+\end{tabular}}
+\end{table}
+
+\begin{table}[H]
+\caption{Tensor Allocation (10,000$\times$10,000, $\sim$400 MB)}
+\centering
+\resizebox{\columnwidth}{!}{
+\begin{tabular}{lccccc}
+\hline
+Config & Avg Time/iter (s) & Page Faults & dTLB Load Misses & IPC & Wall Time (s) \\
+\hline
+tensor\_alloc-4KB-cold & 7.644 & 9,829,439 $\pm$18 & 1,324,266,498 & 2.70 & 391.63 \\
+tensor\_alloc-2MB-cold & 7.450 & 126,064 $\pm$23 & 30,933,222 & 2.76 & 380.66 \\
+tensor\_alloc-4KB-warm & 7.611 & 9,828,398 $\pm$6 & 1,320,928,325 & 2.70 & 389.16 \\
+tensor\_alloc-2MB-warm & 7.357 & 125,097 $\pm$25 & 30,254,145 & 2.77 & 375.11 \\
+\hline
+\end{tabular}}
+\end{table}
+
+\begin{table}[H]
+\caption{Batch Size Variation}
+\centering
+\resizebox{\columnwidth}{!}{
+\begin{tabular}{lccccc}
+\hline
+Config & bs=1 (s/iter) & bs=32 (s/iter) & bs=128 (s/iter) & Page Faults & Wall Time (s) \\
+\hline
+batch\_vary-4KB-cold & 0.198 & 5.241 & 22.125 & 594,069,078 & 1,410.66 \\
+batch\_vary-2MB-cold & 0.195 & 5.106 & 21.404 & 14,910,670 & 1,367.50 \\
+batch\_vary-4KB-warm & 0.197 & 5.285 & 22.360 & 589,831,166 & 1,423.95 \\
+batch\_vary-2MB-warm & 0.195 & 5.078 & 21.438 & 15,762,864 & 1,366.17 \\
+\hline
+\end{tabular}}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{figures/ml/improvement_summary.png}
+\caption{Improvement Summary}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{figures/ml/cpu_cycles.png}
+\caption{CPU Cycles}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{figures/ml/dtlb_store_misses.png}
+\caption{dTLB Store Misses}
+\end{figure}
+
+\subsection{Key Findings}
+
+\paragraph{Massive Page Fault Reduction with 2 MB Pages (22--99\%)}
+
+2 MB huge pages dramatically reduce page faults across \textbf{all} ML workloads. This is the strongest page fault reduction seen across all four workload types in this project.
+
+\begin{table}[H]
+\caption{Page Fault Reduction}
+\centering
+\resizebox{\columnwidth}{!}{
+\begin{tabular}{lccc}
+\hline
+Workload & 4KB Page Faults & 2MB Page Faults & Reduction \\
+\hline
+batch\_vary (cold) & 594,069,078 & 14,910,670 & \textbf{97.5\%} \\
+batch\_vary (warm) & 589,831,166 & 15,762,864 & \textbf{97.3\%} \\
+inference (cold) & 145,950,070 & 7,541,180 & \textbf{94.8\%} \\
+inference (warm) & 148,363,285 & 6,551,774 & \textbf{95.6\%} \\
+tensor\_alloc (cold) & 9,829,439 & 126,064 & \textbf{98.7\%} \\
+tensor\_alloc (warm) & 9,828,398 & 125,097 & \textbf{98.7\%} \\
+model\_load (cold) & 351,086 & 273,003 & \textbf{22.2\%} \\
+model\_load (warm) & 355,585 & 274,829 & \textbf{22.7\%} \\
+\hline
+\end{tabular}}
+\end{table}
+
+The batch\_vary and tensor\_alloc workloads show nearly \textbf{two orders of magnitude} fewer page faults with huge pages. Even model loading --- the shortest workload --- sees a 22\% reduction.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{figures/ml/page_faults.png}
+\caption{Page Faults}
+\end{figure}
+
+\paragraph{dTLB Load Miss Reduction (1--98\%)}
+
+\begin{table}[H]
+\caption{dTLB Load Miss Reduction}
+\centering
+\resizebox{\columnwidth}{!}{
+\begin{tabular}{lccc}
+\hline
+Workload & 4KB dTLB Misses & 2MB dTLB Misses & Reduction \\
+\hline
+tensor\_alloc (cold) & 1,324,266,498 & 30,933,222 & \textbf{97.7\%} \\
+tensor\_alloc (warm) & 1,320,928,325 & 30,254,145 & \textbf{97.7\%} \\
+batch\_vary (cold) & 1,440,553,433 & 162,590,824 & \textbf{88.7\%} \\
+batch\_vary (warm) & 1,460,479,705 & 160,903,002 & \textbf{89.0\%} \\
+inference (cold) & 531,414,385 & 123,380,193 & \textbf{76.8\%} \\
+inference (warm) & 540,086,389 & 120,038,970 & \textbf{77.8\%} \\
+model\_load (cold) & 8,330,475 & 8,250,959 & \textbf{1.0\%} \\
+model\_load (warm) & 7,703,842 & 7,671,505 & \textbf{0.4\%} \\
+\hline
+\end{tabular}}
+\end{table}
+
+The tensor\_alloc workload benefits the most from TLB reduction (97.7\%), which makes sense --- it performs pure contiguous memory allocation and matrix operations. The model\_load workload shows minimal dTLB improvement because model loading is dominated by disk I/O and deserialization rather than memory access patterns.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{figures/ml/dtlb_load_misses.png}
+\caption{dTLB Load Misses}
+\end{figure}
+
+\paragraph{Model Load Time Improves with 2 MB Pages}
+
+\begin{table}[H]
+\caption{Model Load Time}
+\centering
+\resizebox{\columnwidth}{!}{
+\begin{tabular}{lccc}
+\hline
+Config & 4KB Load Time (s) & 2MB Load Time (s) & Improvement \\
+\hline
+Cold & 0.833 & 0.801 & \textbf{+3.8\%} \\
+Warm & 0.786 & 0.742 & \textbf{+5.6\%} \\
+\hline
+\end{tabular}}
+\end{table}
+
+The improvement is modest (\textasciitilde4--6\%) because model loading is bottlenecked by disk I/O and Python deserialization overhead, not memory page faults. However, 2 MB pages consistently outperform 4 KB pages.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{figures/ml/model_load_time.png}
+\caption{Model Load Time}
+\end{figure}
+
+\paragraph{Inference Latency Shows Modest Improvement}
+
+\begin{table}[H]
+\caption{Inference Latency}
+\centering
+\resizebox{\columnwidth}{!}{
+\begin{tabular}{lccc}
+\hline
+Config & 4KB (s/iter) & 2MB (s/iter) & Improvement \\
+\hline
+Inference cold (bs=32) & 5.292 & 5.190 & \textbf{+1.9\%} \\
+Inference warm (bs=32) & 5.219 & 5.217 & \textbf{+0.04\%} \\
+batch\_vary cold (bs=128) & 22.125 & 21.404 & \textbf{+3.3\%} \\
+batch\_vary warm (bs=128) & 22.360 & 21.438 & \textbf{+4.1\%} \\
+batch\_vary cold (bs=32) & 5.241 & 5.106 & \textbf{+2.6\%} \\
+batch\_vary warm (bs=32) & 5.285 & 5.078 & \textbf{+3.9\%} \\
+batch\_vary cold (bs=1) & 0.198 & 0.195 & \textbf{+1.5\%} \\
+batch\_vary warm (bs=1) & 0.197 & 0.195 & \textbf{+1.0\%} \\
+\hline
+\end{tabular}}
+\end{table}
+
+Despite the enormous reduction in page faults and TLB misses, inference latency improvements are modest (1--4\%). This indicates that inference is \textbf{compute-bound} (matrix multiplications dominate runtime), not memory-bound. The page faults and TLB misses happen but don't sit on the critical path for per-iteration latency.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{figures/ml/inference_latency.png}
+\caption{Inference Latency}
+\end{figure}
+
+\paragraph{Tensor Allocation Benefits Most from Huge Pages}
+
+\begin{table}[H]
+\caption{Tensor Allocation Performance}
+\centering
+\resizebox{\columnwidth}{!}{
+\begin{tabular}{lccc}
+\hline
+Config & 4KB Time/iter (s) & 2MB Time/iter (s) & Improvement \\
+\hline
+Cold & 7.644 & 7.450 & \textbf{+2.5\%} \\
+Warm & 7.611 & 7.357 & \textbf{+3.3\%} \\
+\hline
+\end{tabular}}
+\end{table}
+
+With a 98.7\% reduction in page faults and 97.7\% reduction in dTLB misses, tensor\_alloc still only shows 2.5--3.3\% wall-time improvement. This is because the matrix multiply (\texttt{t @ t.T}) dominates runtime --- it's a compute-intensive BLAS operation, and the memory allocation overhead (where page faults occur) is a small fraction of total time.
+
+\paragraph{IPC: 4 KB Pages Achieve Higher IPC Despite More Overhead}
+
+\begin{table}[H]
+\caption{IPC Comparison}
+\centering
+\resizebox{\columnwidth}{!}{
+\begin{tabular}{lcc}
+\hline
+Workload & 4KB IPC & 2MB IPC \\
+\hline
+batch\_vary (cold) & \textbf{1.28} & 1.09 \\
+batch\_vary (warm) & \textbf{1.27} & 1.09 \\
+inference (cold) & \textbf{1.26} & 1.14 \\
+inference (warm) & \textbf{1.26} & 1.13 \\
+model\_load (cold) & 1.22 & \textbf{1.24} \\
+model\_load (warm) & \textbf{1.27} & \textbf{1.28} \\
+tensor\_alloc (cold) & 2.70 & \textbf{2.76} \\
+tensor\_alloc (warm) & 2.70 & \textbf{2.77} \\
+\hline
+\end{tabular}}
+\end{table}
+
+Interestingly, 4 KB pages achieve \textbf{higher IPC} for batch\_vary and inference workloads despite having far more page faults and TLB misses. This counterintuitive result is because:
+\begin{itemize}
+\item With 4 KB pages, the CPU executes \textbf{more total instructions} (25B vs 21B for batch\_vary) --- likely due to additional page table walks and TLB miss handling in microcode
+\item These extra instructions are fast (register-to-register operations in the page walk), inflating IPC
+\item For tensor\_alloc, where the workload is purely compute-bound (BLAS), 2 MB pages achieve slightly higher IPC (2.77 vs 2.70)
+\end{itemize}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{figures/ml/ipc.png}
+\caption{IPC Comparison}
+\end{figure}
+
+\subsection{Analysis}
+
+\paragraph{Why Huge Pages Strongly Benefit ML Workloads}
+
+\begin{itemize}
+\item \textbf{Large contiguous memory allocations.} PyTorch allocates tensors via \texttt{mmap}, which maps directly to physical pages. A single 10,000$\times$10,000 float32 tensor ($\sim$400 MB) requires $\sim$100,000 4KB pages but only $\sim$200 2MB pages. This 500$\times$ reduction in page count directly translates to fewer page faults during allocation.
+
+\item \textbf{High spatial locality.} Tensor operations (matrix multiply, convolutions) sweep through memory linearly. With 2 MB pages, each TLB entry covers 512$\times$ more memory, keeping the TLB hot and eliminating most address translation overhead.
+
+\item \textbf{Repeated memory reuse in inference.} Forward passes reuse the same weight tensors repeatedly. With fewer TLB entries needed for huge pages, the TLB can effectively cache the model's entire memory footprint, eliminating nearly all translation overhead.
+
+\item \textbf{batch\_vary amplifies the effect.} Larger batch sizes (bs=128) allocate larger input tensors and intermediate activations, requiring more pages. The total page faults with 4 KB pages scale to $\sim$594M (!) vs $\sim$15M with 2 MB pages --- a 40$\times$ reduction.
+\end{itemize}
+
+\paragraph{Why Performance Gains Are Modest Despite Massive Fault Reduction}
+Despite 95--99\% reductions in page faults and 77--98\% reductions in dTLB misses, wall-time improvements are only 1--5\%. This is because:
+
+\begin{itemize}
+\item \textbf{Compute dominance.} ResNet-152 inference is dominated by convolution and matrix multiply operations (BLAS/MKL), which are CPU-bound. Memory stalls from TLB misses are a small fraction of total execution time.
+
+\item \textbf{Efficient hardware page walkers.} Modern CPUs (the test system) have dedicated hardware page table walkers that handle TLB misses with low overhead ($\sim$10--20 cycles per walk). Even millions of TLB misses only add seconds to a run that takes hundreds of seconds.
+
+\item \textbf{OS page cache effectiveness.} In warm-cache runs, most data is already in the OS page cache, so page faults are minor faults (no disk I/O), which are cheap ($\sim$1$\mu$s each).
+\end{itemize}
+
+\paragraph{Conclusions}
+\begin{itemize}
+\item \textbf{2 MB huge pages dramatically reduce page faults (95--99\%) and dTLB misses (77--98\%)} for ML workloads --- the largest reduction across all four workload types in this study.
+
+\item \textbf{Wall-time improvement is modest (1--5\%)} because ML inference is compute-bound, not memory-bound. The CPU spends most of its time in BLAS matrix operations, not waiting for page table walks.
+
+\item \textbf{Tensor allocation workloads show the strongest improvement} (98.7\% page fault reduction, 3.3\% latency improvement) due to pure contiguous memory allocation patterns.
+
+\item \textbf{Larger batch sizes amplify page fault differences} (594M vs 15M for bs=128) but don't proportionally increase latency improvement, confirming that page faults are off the critical path.
+
+\item \textbf{Model loading benefits modestly} (+4--6\%) --- disk I/O and deserialization dominate, not memory allocation.
+
+\item \textbf{THP \texttt{always} is safe and mildly beneficial for ML workloads} --- unlike database and webserver workloads where THP compaction caused performance regressions, ML workloads use large contiguous allocations that naturally align with huge pages, avoiding compaction overhead.
+
+\item \textbf{Huge pages are not universally beneficial, even when metrics improve dramatically.} The ML workload is the clearest example: massive improvements in memory metrics don't translate to proportional application-level gains when the workload is compute-bound.
+\end{itemize}
+
+% ============================================================
 % VII. CROSS-WORKLOAD COMPARISON
 % ============================================================
 \section{Cross-Workload Comparison}
@@ -637,15 +1019,15 @@ Table~\ref{tab:cross_workload} summarizes the page size impact across all three 
 \caption{Cross-Workload Page Size Impact}
 \label{tab:cross_workload}
 \resizebox{\columnwidth}{!}{%
-\begin{tabular}{@{}lllll@{}}
+\begin{tabular}{@{}llllll@{}}
 \toprule
-\textbf{Aspect} & \textbf{Synthetic (Random)} & \textbf{Web Server} & \textbf{Database} \\
+\textbf{Aspect} & \textbf{Synthetic (Random)} & \textbf{Web Server} & \textbf{Database} & \textbf{ML Workload} \\
 \midrule
-Page size winner   & \textbf{2\,MB} (+56\%) & \textbf{4\,KB} (+33--133\%) & \textbf{4\,KB} (+9--42\%) \\
-Access pattern     & Truly random, user-space & Kernel (sendfile) & Index traversal \\
-Page faults (4KB)  & High (262K) & Very low ($\sim$65) & Low ($\sim$1K--3K) \\
-TLB miss reduction & 99.7\% with 2MB & Mixed / worse & No clear benefit \\
-Why 4KB wins       & N/A & THP overhead, iTLB & THP overhead, buffer pool \\
+Page size winner   & \textbf{2\,MB} (+56\%) & \textbf{4\,KB} (+33--133\%) & \textbf{4\,KB} (+9--42\%) & \textbf{2\,MB} (+1--5\%) \\
+Access pattern     & Truly random, user-space & Kernel (sendfile) & Index traversal & Large contiguous tensors, BLAS \\
+Page faults (4KB)  & High (262K) & Very low ($\sim$65) & Low ($\sim$1K--3K) & Extremely high ($\sim$594M peak) \\
+TLB miss reduction & 99.7\% with 2MB & Mixed / worse & No clear benefit & 77--98\% reduction with 2MB \\
+Why 4KB wins       & N/A & THP overhead, iTLB & THP overhead, buffer pool & N/A (compute-bound limits gains) \\
 \bottomrule
 \end{tabular}%
 }
@@ -654,12 +1036,25 @@ Why 4KB wins       & N/A & THP overhead, iTLB & THP overhead, buffer pool \\
 Key insights from the cross-workload comparison:
 \begin{enumerate}
     \item \textbf{Only purely random, user-space memory access benefits from huge pages}. The synthetic random workload---where each access touches a different page---is the only scenario with clear speedup.
+    
     \item \textbf{Kernel-mediated access (sendfile) bypasses TLB benefits}. nginx's use of \texttt{sendfile()} means data never passes through user-space TLB entries, negating the advantage of huge pages.
+    
     \item \textbf{Application-level buffering masks page faults}. PostgreSQL's buffer pool absorbs most memory accesses before they reach the OS, making page size nearly irrelevant for page fault behavior.
+    
     \item \textbf{THP \texttt{always} mode is harmful for server workloads}. The background compaction by \texttt{khugepaged} consistently degrades performance for both nginx and PostgreSQL.
+    
     \item \textbf{\texttt{madvise} mode is the correct default}. It allows applications to opt-in to huge pages only where beneficial.
-\end{enumerate}
 
+    \item \textbf{ML workloads see massive memory metric improvements but limited speedup}. Despite 95--99\% reductions in page faults and 77--98\% reductions in dTLB misses, end-to-end performance improves only 1--5\%.
+
+    \item \textbf{Compute-bound workloads diminish the impact of memory optimizations}. In ML inference, BLAS-dominated matrix operations dominate runtime, so reduced address translation overhead has minimal effect on wall time.
+
+    \item \textbf{Contiguous allocation patterns strongly favor huge pages}. Large tensor allocations (hundreds of MB) align naturally with 2 MB pages, eliminating most page faults and TLB pressure.
+
+    \item \textbf{Batch size scaling amplifies memory effects without proportional latency gains}. Larger batches dramatically increase page faults under 4 KB pages, but do not significantly change runtime due to compute dominance.
+
+    \item \textbf{Huge pages are most beneficial when memory overhead is on the critical path}. ML workloads demonstrate that even extreme improvements in memory metrics may not translate to performance gains unless memory is the bottleneck.
+\end{enumerate}
 % ============================================================
 % VIII. CONCLUSIONS
 % ============================================================
@@ -676,21 +1071,17 @@ This study provides a comprehensive, workload-aware characterization of how page
 
     \item \textbf{Database performance degrades with huge pages}: PostgreSQL OLTP throughput dropped 9--42\% with 2\,MB pages because the internal buffer pool masks page fault benefits while THP overhead increases tail latency.
 
+    \item \textbf{ML workloads show massive memory improvements but modest performance gains}: page faults decrease by 95--99\% and dTLB misses by 77--98\%, yet inference latency improves only 1--5\% because execution is dominated by compute-intensive BLAS operations rather than memory access overhead.
+
     \item \textbf{TLB miss reduction is the primary performance driver}, not page fault reduction. Page faults are a fixed one-time cost; TLB misses are ongoing during execution.
 
     \item \textbf{THP \texttt{madvise} mode is the recommended configuration} for production systems, allowing workload-specific opt-in rather than system-wide huge page promotion.
 
     \item \textbf{IPC is a useful diagnostic indicator}: low IPC ($<$0.5) signals TLB/memory bottlenecks where huge pages may help, while high IPC ($>$1.0) indicates spatial locality that already minimizes TLB overhead.
+
+    \item \textbf{Compute-bound workloads limit the benefits of huge pages}: the ML workload demonstrates that even extreme reductions in memory overhead do not translate into proportional application-level gains when computation dominates execution time.
 \end{enumerate}
 
 These findings demonstrate that page size tuning must be informed by workload memory access patterns. Large pages are not universally beneficial, and indiscriminate use of THP \texttt{always} mode can significantly harm performance for server workloads.
-
-\section{Future Work}
-
-The following extensions are planned:
-\begin{itemize}
-    \item \textbf{Machine Learning Workloads}: evaluate PyTorch model loading and inference under different page sizes to characterize the impact on contiguous memory allocation patterns.
-    \item \textbf{1\,GB Huge Pages}: investigate the effect of even larger page sizes on workloads that allocate very large memory regions.
-\end{itemize}
 
 \end{document}
