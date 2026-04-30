@@ -32,6 +32,12 @@ webserver-workload/test_data/
 # === Compiled binaries ===
 synthetic-workload/load
 
+# === ML workload artifacts ===
+ml-workload/.venv/
+ml-workload/raw_results/
+ml-workload/plots/
+ml-workload/results.csv
+
 # === OS / Editor ===
 .DS_Store
 Thumbs.db
@@ -40,3 +46,4 @@ Thumbs.db
 *.swo
 .vscode/
 .idea/
+ins
